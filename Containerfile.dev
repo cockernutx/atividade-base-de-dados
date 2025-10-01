@@ -1,0 +1,8 @@
+FROM ghcr.io/astral-sh/uv:debian
+
+RUN apt update -y
+RUN apt install curl git -y
+
+RUN curl -fsSL https://claude.ai/install.sh | bash
+
+ENV PATH="/root/.local/bin:$PATH"
