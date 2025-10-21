@@ -84,13 +84,13 @@ uv run python data_cleaner/main.py
 ```
 
 This will:
-- Load `atlas2010_dashboard.xlsx`
+- Load the raw Excel file
 - Apply cleaning and validation filters
-- Save the cleaned data as `atlas2010_cleaned.parquet`
+- Save the cleaned data as `favelas_comunidades_2022_cleaned.parquet` and CSV
 
 ### 2. Launch the Dashboard
 
-Start the interactive dashboard:
+Start the interactive dashboard (it will read `favelas_comunidades_2022_cleaned.parquet` by default):
 
 ```bash
 uv run streamlit run dashboard/main.py

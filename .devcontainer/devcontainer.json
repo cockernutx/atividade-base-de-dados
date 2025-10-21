@@ -24,7 +24,9 @@
 				"ms-toolsai.datawrangler",
 				"ms-toolsai.jupyter",
 				"ms-toolsai.vscode-jupyter-cell-tags",
-				"ms-toolsai.vscode-jupyter-slideshow"
+				"ms-toolsai.vscode-jupyter-slideshow",
+				"dvirtz.parquet-viewer",
+				"AdamViola.parquet-explorer"
 			]
 		}
 	}

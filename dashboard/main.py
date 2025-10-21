@@ -8,11 +8,21 @@ from pathlib import Path
 
 
 def load_data(file_path: str) -> pl.DataFrame:
-    """Load cleaned data from parquet file."""
+    """Load cleaned data from parquet file. Defaults to the favelas dataset."""
     path = Path(file_path)
     if not path.exists():
         st.error(f"Data file not found: {file_path}")
-        st.info("Please run the data cleaner first: `uv run python data_cleaner/main.py`")
+        st.info("Execute o limpador de dados primeiro: `uv run python data_cleaner/main.py`")
+        st.stop()
+    return pl.read_parquet(path)
+
+
+def load_gini_data() -> pl.DataFrame:
+    """Load cleaned Gini index data."""
+    path = Path("indice_gini_cleaned.parquet")
+    if not path.exists():
+        st.error("Arquivo de índice de Gini não encontrado!")
+        st.info("O arquivo 'indice_gini_cleaned.parquet' deve estar no diretório raiz.")
         st.stop()
     return pl.read_parquet(path)
 
@@ -21,449 +31,368 @@ def show_overview(df: pl.DataFrame) -> None:
     """Display dataset overview and main statistics."""
     st.header("📊 Dataset Overview")
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("Total Municipalities", f"{len(df):,}")
+        st.metric("Setores Censitários", f"{df['CD_SETOR'].n_unique():,}")
     with col2:
-        st.metric("Total Population", f"{df['populacao_total'].sum():,.0f}")
+        st.metric("Favelas/Comunidades", f"{df['CD_FCU'].n_unique():,}")
     with col3:
-        st.metric("States Covered", df['uf'].n_unique())
+        st.metric("Municípios", f"{df['CD_MUN'].n_unique():,}")
+    with col4:
+        st.metric("Estados (UFs)", df['CD_UF'].n_unique())
 
     st.subheader("Dataset Information")
-    st.write(f"**Shape:** {df.shape[0]} rows × {df.shape[1]} columns")
-    st.write(f"**Year:** {df['ano'].unique().to_list()}")
+    st.write(f"**Shape:** {df.shape[0]:,} rows × {df.shape[1]} columns")
+    st.write(f"**Year:** 2022 (Mapeamento 2022)")
+    st.write(f"**Source:** IBGE - Favelas e Comunidades Urbanas")
 
     # Display column descriptions
     st.subheader("Column Descriptions")
     descriptions = {
-        "ano": "Year of data collection",
-        "uf": "State (Unidade Federativa)",
-        "nome_mun": "Municipality name",
-        "espvida": "Life expectancy at birth (years)",
-        "fectot": "Total fertility rate",
-        "mort1": "Infant mortality rate (per 1,000 live births)",
-        "mort5": "Child mortality rate under 5 (per 1,000)",
-        "sobre60": "Probability of survival to age 60 (%)",
-        "e_anosestudo": "Average years of schooling",
-        "t_analf18m": "Illiteracy rate for 18+ population (%)",
-        "renda_per_capita": "Per capita income (BRL)",
-        "populacao_total": "Total population"
+        "CD_SETOR": "Código do Setor Censitário",
+        "CD_FCU": "Código da Favela/Comunidade Urbana",
+        "NM_FCU": "Nome da Favela/Comunidade",
+        "CD_MUN": "Código do Município",
+        "NM_MUN": "Nome do Município",
+        "CD_UF": "Código da Unidade Federativa",
+        "NM_UF": "Nome do Estado",
+        "total_fcu_mun": "Total de Favelas/Comunidades no Município",
+        "total_setores_mun": "Total de Setores no Município",
+        "total_fcu_uf": "Total de Favelas/Comunidades no Estado",
+        "total_setores_uf": "Total de Setores no Estado",
+        "total_municipios_uf": "Total de Municípios com Favelas/Comunidades no Estado"
     }
 
     desc_df = pl.DataFrame({
         "Column": list(descriptions.keys()),
         "Description": list(descriptions.values())
     })
-    st.dataframe(desc_df, width='stretch', hide_index=True)
+    st.dataframe(desc_df, use_container_width=True, hide_index=True)
 
 
-def show_health_analysis(df: pl.DataFrame) -> None:
-    """Display health indicators analysis."""
-    st.header("🏥 Health Indicators Analysis")
-
-    # Convert to pandas for plotly
-    pdf = df.to_pandas()
-
-    # Life expectancy distribution
-    st.subheader("Life Expectancy Distribution")
-    st.write("""
-    Life expectancy varies significantly across Brazilian municipalities,
-    reflecting differences in healthcare access, living conditions, and socioeconomic factors.
-    """)
-
-    fig = px.histogram(
-        pdf,
-        x='espvida',
-        nbins=50,
-        title='Life Expectancy Distribution',
-        labels={'espvida': 'Life Expectancy (years)', 'count': 'Number of Municipalities'},
-        color_discrete_sequence=['#1f77b4']
-    )
-    fig.update_layout(showlegend=False)
-    st.plotly_chart(fig, config={'displayModeBar': False})
-    st.download_button(
-        label="Download chart as HTML",
-        data=fig.to_html(),
-        file_name="life_expectancy_distribution.html",
-        mime="text/html"
-    )
-
-    # Statistics
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Mean", f"{df['espvida'].mean():.2f} years")
-    with col2:
-        st.metric("Median", f"{df['espvida'].median():.2f} years")
-    with col3:
-        st.metric("Minimum", f"{df['espvida'].min():.2f} years")
-    with col4:
-        st.metric("Maximum", f"{df['espvida'].max():.2f} years")
-
-    # Mortality rates
-    st.subheader("Child Mortality")
-    st.write("""
-    Mortality rates are key indicators of healthcare quality and access.
-    Lower rates indicate better health services and living conditions.
-    """)
-
-    fig = go.Figure()
-    fig.add_trace(go.Box(y=pdf['mort1'], name='Under 1 year', marker_color='#ff7f0e'))
-    fig.add_trace(go.Box(y=pdf['mort5'], name='Under 5 years', marker_color='#2ca02c'))
-    fig.update_layout(
-        title='Mortality Rates Distribution',
-        yaxis_title='Deaths per 1,000 live births',
-        showlegend=True
-    )
-    st.plotly_chart(fig, config={'displayModeBar': False})
-    st.download_button(
-        label="Download chart as HTML",
-        data=fig.to_html(),
-        file_name="mortality_rates_distribution.html",
-        mime="text/html"
-    )
-
-    # Survival to 60
-    st.subheader("Survival to Age 60")
-    st.write("""
-    The probability of survival to age 60 reflects long-term health outcomes
-    and quality of life throughout adulthood.
-    """)
-
-    fig = px.violin(
-        pdf,
-        y='sobre60',
-        box=True,
-        title='Probability of Survival to Age 60 Distribution',
-        labels={'sobre60': 'Survival Probability (%)'},
-        color_discrete_sequence=['#d62728']
-    )
-    st.plotly_chart(fig, config={'displayModeBar': False})
-    st.download_button(
-        label="Download chart as HTML",
-        data=fig.to_html(),
-        file_name="survival_to_60_distribution.html",
-        mime="text/html"
-    )
-
-
-def show_education_analysis(df: pl.DataFrame) -> None:
-    """Display education indicators analysis."""
-    st.header("📚 Education Indicators Analysis")
+def show_geographic_distribution(df: pl.DataFrame) -> None:
+    """Display geographic distribution of favelas and communities."""
+    st.header("🗺️ Distribuição Geográfica")
 
     pdf = df.to_pandas()
 
-    # Years of schooling
-    st.subheader("Average Years of Schooling")
+    st.subheader("Favelas e Comunidades por Estado")
     st.write("""
-    Education levels vary widely across municipalities,
-    reflecting disparities in educational access and quality.
+    A distribuição de favelas e comunidades urbanas varia significativamente entre os estados brasileiros,
+    refletindo padrões de urbanização, crescimento populacional e desenvolvimento socioeconômico.
     """)
 
-    fig = px.histogram(
-        pdf,
-        x='e_anosestudo',
-        nbins=40,
-        title='Average Years of Schooling Distribution',
-        labels={'e_anosestudo': 'Years of Schooling', 'count': 'Number of Municipalities'},
-        color_discrete_sequence=['#9467bd']
-    )
-    st.plotly_chart(fig, config={'displayModeBar': False})
-    st.download_button(
-        label="Download chart as HTML",
-        data=fig.to_html(),
-        file_name="years_of_schooling_distribution.html",
-        mime="text/html"
-    )
+    # State-level aggregation
+    state_stats = df.group_by(['CD_UF', 'NM_UF']).agg([
+        pl.col('CD_FCU').n_unique().alias('total_fcu'),
+        pl.col('CD_SETOR').n_unique().alias('total_setores'),
+        pl.col('CD_MUN').n_unique().alias('total_municipios')
+    ]).sort('total_fcu', descending=True)
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Mean", f"{df['e_anosestudo'].mean():.2f} years")
-    with col2:
-        st.metric("Median", f"{df['e_anosestudo'].median():.2f} years")
-    with col3:
-        st.metric("Std Dev", f"{df['e_anosestudo'].std():.2f} years")
-
-    # Illiteracy rate
-    st.subheader("Illiteracy Rate (18+ population)")
-    st.write("""
-    Adult illiteracy rates indicate historical educational challenges
-    and barriers to basic education access.
-    """)
-
-    fig = px.box(
-        pdf,
-        y='t_analf18m',
-        title='Illiteracy Rates Distribution',
-        labels={'t_analf18m': 'Illiteracy Rate (%)'},
-        color_discrete_sequence=['#8c564b']
-    )
-    st.plotly_chart(fig, config={'displayModeBar': False})
-    st.download_button(
-        label="Download chart as HTML",
-        data=fig.to_html(),
-        file_name="illiteracy_rates_distribution.html",
-        mime="text/html"
-    )
-
-    # Correlation between education metrics
-    st.subheader("Relationship Between Education Metrics")
-    fig = px.scatter(
-        pdf,
-        x='e_anosestudo',
-        y='t_analf18m',
-        title='Years of Schooling vs Illiteracy Rate',
-        labels={
-            'e_anosestudo': 'Average Years of Schooling',
-            't_analf18m': 'Illiteracy Rate (%)'
-        },
-        opacity=0.5,
-        color_discrete_sequence=['#e377c2']
-    )
-    st.plotly_chart(fig, config={'displayModeBar': False})
-    st.download_button(
-        label="Download chart as HTML",
-        data=fig.to_html(),
-        file_name="schooling_vs_illiteracy.html",
-        mime="text/html"
-    )
-
-
-def show_economic_analysis(df: pl.DataFrame) -> None:
-    """Display economic indicators analysis."""
-    st.header("💰 Economic Indicators Analysis")
-
-    pdf = df.to_pandas()
-
-    st.subheader("Per Capita Income Distribution")
-    st.write("""
-    Income inequality is evident across Brazilian municipalities,
-    with significant variations in economic development and opportunities.
-    """)
-
-    fig = px.histogram(
-        pdf,
-        x='renda_per_capita',
-        nbins=50,
-        title='Per Capita Income Distribution',
-        labels={'renda_per_capita': 'Per Capita Income (BRL)', 'count': 'Number of Municipalities'},
-        color_discrete_sequence=['#2ca02c']
-    )
-    st.plotly_chart(fig, config={'displayModeBar': False})
-    st.download_button(
-        label="Download chart as HTML",
-        data=fig.to_html(),
-        file_name="income_distribution.html",
-        mime="text/html"
-    )
-
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Mean", f"R$ {df['renda_per_capita'].mean():.2f}")
-    with col2:
-        st.metric("Median", f"R$ {df['renda_per_capita'].median():.2f}")
-    with col3:
-        st.metric("Minimum", f"R$ {df['renda_per_capita'].min():.2f}")
-    with col4:
-        st.metric("Maximum", f"R$ {df['renda_per_capita'].max():.2f}")
-
-    # Income vs Life Expectancy
-    st.subheader("Income vs Life Expectancy")
-    st.write("""
-    Higher income generally correlates with better health outcomes,
-    reflecting improved access to healthcare, nutrition, and living conditions.
-    """)
-
-    fig = px.scatter(
-        pdf,
-        x='renda_per_capita',
-        y='espvida',
-        title='Per Capita Income vs Life Expectancy',
-        labels={
-            'renda_per_capita': 'Per Capita Income (BRL)',
-            'espvida': 'Life Expectancy (years)'
-        },
-        opacity=0.5,
-        color='espvida',
-        color_continuous_scale='Viridis'
-    )
-    st.plotly_chart(fig, config={'displayModeBar': False})
-    st.download_button(
-        label="Download chart as HTML",
-        data=fig.to_html(),
-        file_name="income_vs_life_expectancy.html",
-        mime="text/html"
-    )
-
-    # Income vs Education
-    st.subheader("Income vs Education")
-    st.write("""
-    Education and income are closely linked,
-    with better education leading to higher earning potential.
-    """)
-
-    fig = px.scatter(
-        pdf,
-        x='e_anosestudo',
-        y='renda_per_capita',
-        title='Years of Schooling vs Per Capita Income',
-        labels={
-            'e_anosestudo': 'Average Years of Schooling',
-            'renda_per_capita': 'Per Capita Income (BRL)'
-        },
-        opacity=0.5,
-        color='renda_per_capita',
-        color_continuous_scale='Plasma'
-    )
-    st.plotly_chart(fig, config={'displayModeBar': False})
-    st.download_button(
-        label="Download chart as HTML",
-        data=fig.to_html(),
-        file_name="schooling_vs_income.html",
-        mime="text/html"
-    )
-
-
-def show_regional_analysis(df: pl.DataFrame) -> None:
-    """Display regional comparison analysis."""
-    st.header("🗺️ Regional Analysis")
-
-    pdf = df.to_pandas()
-
-    st.subheader("Comparison by State")
-    st.write("""
-    Regional disparities reflect historical, economic, and geographic differences
-    among Brazilian states.
-    """)
-
-    # Select indicator
-    indicator = st.selectbox(
-        "Select indicator to compare:",
-        options=[
-            ('espvida', 'Life Expectancy'),
-            ('renda_per_capita', 'Per Capita Income'),
-            ('e_anosestudo', 'Years of Schooling'),
-            ('t_analf18m', 'Illiteracy Rate'),
-            ('mort1', 'Infant Mortality'),
-            ('fectot', 'Fertility Rate')
-        ],
-        format_func=lambda x: x[1]
-    )
-
-    col_name, col_label = indicator
-
-    # Calculate state averages
-    state_avg = df.group_by('uf').agg(
-        pl.col(col_name).mean().alias('avg_value'),
-        pl.col('populacao_total').sum().alias('total_pop')
-    ).sort('avg_value', descending=True)
-
-    state_pdf = state_avg.to_pandas()
-
-    # Invert color scale for negative indicators (lower is better)
-    reverse_indicators = ['mort1', 'mort5', 't_analf18m']
-    color_scale = 'RdYlGn_r' if col_name in reverse_indicators else 'RdYlGn'
+    state_pdf = state_stats.to_pandas()
 
     fig = px.bar(
         state_pdf,
-        x='uf',
-        y='avg_value',
-        title=f'Average {col_label} by State',
-        labels={'uf': 'State', 'avg_value': col_label},
-        color='avg_value',
-        color_continuous_scale=color_scale
+        x='NM_UF',
+        y='total_fcu',
+        title='Número de Favelas/Comunidades por Estado',
+        labels={'NM_UF': 'Estado', 'total_fcu': 'Número de Favelas/Comunidades'},
+        color='total_fcu',
+        color_continuous_scale='Reds',
+        text='total_fcu'
     )
-    fig.update_layout(xaxis_tickangle=-45)
-    st.plotly_chart(fig, config={'displayModeBar': False})
-    st.download_button(
-        label="Download chart as HTML",
-        data=fig.to_html(),
-        file_name=f"state_comparison_{col_name}.html",
-        mime="text/html"
-    )
+    fig.update_traces(textposition='outside')
+    fig.update_layout(xaxis_tickangle=-45, showlegend=False)
+    st.plotly_chart(fig, use_container_width=True)
 
-    # Top and bottom municipalities
-    st.subheader(f"Top 10 Municipalities - {col_label}")
-    top10 = df.select(['nome_mun', 'uf', col_name]).sort(col_name, descending=True).head(10)
-    st.dataframe(top10.to_pandas(), width='stretch', hide_index=True)
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Total de Estados", len(state_stats))
+    with col2:
+        st.metric("Média por Estado", f"{state_stats['total_fcu'].mean():.0f}")
+    with col3:
+        st.metric("Mediana por Estado", f"{state_stats['total_fcu'].median():.0f}")
 
-    st.subheader(f"Bottom 10 Municipalities - {col_label}")
-    bottom10 = df.select(['nome_mun', 'uf', col_name]).sort(col_name).head(10)
-    st.dataframe(bottom10.to_pandas(), width='stretch', hide_index=True)
+    # Top states table
+    st.subheader("Maiores 10 Estados com Mais Favelas/Comunidades")
+    st.dataframe(state_pdf.head(10)[['NM_UF', 'total_fcu', 'total_setores', 'total_municipios']], 
+                 use_container_width=True, hide_index=True)
 
 
-def show_demographic_analysis(df: pl.DataFrame) -> None:
-    """Display demographic analysis."""
-    st.header("👥 Demographic Analysis")
+def show_municipal_analysis(df: pl.DataFrame) -> None:
+    """Display municipal-level analysis."""
+    st.header("🏙️ Análise Municipal")
 
     pdf = df.to_pandas()
 
-    st.subheader("Population Distribution")
+    st.subheader("Municípios com Mais Favelas/Comunidades")
     st.write("""
-    Most Brazilian municipalities have small populations,
-    with a few large urban centers concentrating significant population.
+    Grandes centros urbanos concentram o maior número de favelas e comunidades,
+    refletindo processos históricos de urbanização acelerada e desigualdade social.
     """)
 
-    fig = px.histogram(
-        pdf,
-        x='populacao_total',
-        nbins=50,
-        title='Municipal Population Distribution',
-        labels={'populacao_total': 'Population', 'count': 'Number of Municipalities'},
-        log_y=True,
-        color_discrete_sequence=['#17becf']
-    )
-    st.plotly_chart(fig, config={'displayModeBar': False})
-    st.download_button(
-        label="Download chart as HTML",
-        data=fig.to_html(),
-        file_name="population_distribution.html",
-        mime="text/html"
-    )
+    # Municipal aggregation
+    mun_stats = df.group_by(['CD_MUN', 'NM_MUN', 'NM_UF']).agg([
+        pl.col('CD_FCU').n_unique().alias('total_fcu'),
+        pl.col('CD_SETOR').n_unique().alias('total_setores')
+    ]).sort('total_fcu', descending=True).head(30)
 
-    # Largest municipalities
-    st.subheader("Top 20 Most Populous Municipalities")
-    largest = df.select(['nome_mun', 'uf', 'populacao_total']).sort('populacao_total', descending=True).head(20)
-    largest_pdf = largest.to_pandas()
+    mun_pdf = mun_stats.to_pandas()
+    mun_pdf['label'] = mun_pdf['NM_MUN'] + ' - ' + mun_pdf['NM_UF']
 
     fig = px.bar(
-        largest_pdf,
-        x='nome_mun',
-        y='populacao_total',
-        title='Top 20 Most Populous Municipalities',
-        labels={'nome_mun': 'Municipality', 'populacao_total': 'Population'},
-        color='populacao_total',
-        color_continuous_scale='Blues'
+        mun_pdf.head(20),
+        x='total_fcu',
+        y='label',
+        title='Maiores 20 Municípios com Mais Favelas/Comunidades',
+        labels={'label': 'Município', 'total_fcu': 'Número de Favelas/Comunidades'},
+        orientation='h',
+        color='total_fcu',
+        color_continuous_scale='Viridis',
+        text='total_fcu'
     )
-    fig.update_layout(xaxis_tickangle=-45)
-    st.plotly_chart(fig, config={'displayModeBar': False})
-    st.download_button(
-        label="Download chart as HTML",
-        data=fig.to_html(),
-        file_name="top_20_populous_municipalities.html",
-        mime="text/html"
-    )
+    fig.update_traces(textposition='outside')
+    fig.update_layout(yaxis={'categoryorder': 'total ascending'}, showlegend=False, height=600)
+    st.plotly_chart(fig, use_container_width=True)
 
-    # Fertility rate
-    st.subheader("Fertility Rate Analysis")
+    # Statistics
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Total de Municípios", df['CD_MUN'].n_unique())
+    with col2:
+        top_mun = mun_stats.head(1)
+        st.metric("Município Líder", f"{top_mun['NM_MUN'][0]} - {top_mun['NM_UF'][0]}")
+    with col3:
+        st.metric("Favelas/Comunidades", f"{top_mun['total_fcu'][0]}")
+
+    # Detailed table
+    st.subheader("Maiores 30 Municípios - Dados Detalhados")
+    display_df = mun_pdf[['NM_MUN', 'NM_UF', 'total_fcu', 'total_setores']].copy()
+    display_df.columns = ['Município', 'Estado', 'Favelas/Comunidades', 'Setores']
+    st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+
+def show_community_analysis(df: pl.DataFrame) -> None:
+    """Display analysis of individual communities."""
+    st.header("🏘️ Análise de Comunidades")
+
+    st.subheader("Comunidades Mais Presentes")
     st.write("""
-    Fertility rates indicate demographic trends and family planning patterns
-    across different regions and socioeconomic contexts.
+    Algumas comunidades e favelas aparecem em múltiplos setores censitários,
+    indicando áreas territorialmente extensas ou complexas.
     """)
 
-    fig = px.box(
-        pdf,
-        y='fectot',
-        title='Total Fertility Rate Distribution',
-        labels={'fectot': 'Total Fertility Rate'},
-        color_discrete_sequence=['#bcbd22']
+    # Communities with most sectors
+    comm_stats = df.group_by(['CD_FCU', 'NM_FCU', 'NM_MUN', 'NM_UF']).agg([
+        pl.col('CD_SETOR').n_unique().alias('num_setores')
+    ]).sort('num_setores', descending=True).head(30)
+
+    comm_pdf = comm_stats.to_pandas()
+    comm_pdf['label'] = comm_pdf['NM_FCU'] + ' (' + comm_pdf['NM_MUN'] + ' - ' + comm_pdf['NM_UF'] + ')'
+
+    fig = px.bar(
+        comm_pdf.head(20),
+        x='num_setores',
+        y='label',
+        title='Maiores 20 Favelas/Comunidades com Mais Setores Censitários',
+        labels={'label': 'Comunidade', 'num_setores': 'Número de Setores'},
+        orientation='h',
+        color='num_setores',
+        color_continuous_scale='Blues',
+        text='num_setores'
     )
-    st.plotly_chart(fig, config={'displayModeBar': False})
+    fig.update_traces(textposition='outside')
+    fig.update_layout(yaxis={'categoryorder': 'total ascending'}, showlegend=False, height=600)
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Statistics
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Total de Comunidades Únicas", df['CD_FCU'].n_unique())
+    with col2:
+        st.metric("Média de Setores por Comunidade", f"{df.group_by('CD_FCU').agg(pl.col('CD_SETOR').n_unique()).select(pl.col('CD_SETOR').mean())[0,0]:.2f}")
+    with col3:
+        max_setores = comm_stats['num_setores'].max()
+        st.metric("Máximo de Setores", max_setores)
+
+    # Detailed table
+    st.subheader("Maiores 30 Comunidades - Dados Detalhados")
+    display_df = comm_pdf[['NM_FCU', 'NM_MUN', 'NM_UF', 'num_setores']].copy()
+    display_df.columns = ['Nome da Comunidade', 'Município', 'Estado', 'Número de Setores']
+    st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+
+def show_inequality_analysis(df: pl.DataFrame) -> None:
+    """Display analysis of favelas/communities vs Gini index (social inequality)."""
+    st.header("📊 Desigualdade Social e Favelas/Comunidades")
+    
+    st.write("""
+    Esta análise relaciona a quantidade de favelas e comunidades urbanas por estado 
+    com o Índice de Gini (2024), que mede a desigualdade de renda. 
+    
+    **Índice de Gini:** varia de 0 (igualdade perfeita) a 1 (desigualdade máxima).
+    Valores mais altos indicam maior concentração de renda.
+    """)
+    
+    # Load Gini data
+    df_gini = load_gini_data()
+    
+    # Aggregate favelas data by state
+    state_stats = df.group_by(['CD_UF', 'NM_UF']).agg([
+        pl.col('CD_FCU').n_unique().alias('total_fcu'),
+        pl.col('CD_SETOR').n_unique().alias('total_setores'),
+        pl.col('CD_MUN').n_unique().alias('total_municipios')
+    ])
+    
+    # Join with Gini data
+    combined = state_stats.join(df_gini, on='CD_UF', how='left', suffix='_gini')
+    
+    # Sort by total favelas
+    combined = combined.sort('total_fcu', descending=True)
+    
+    # Convert to pandas for plotting
+    combined_pdf = combined.to_pandas()
+    
+    # Overview metrics
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Estados Analisados", len(combined))
+    with col2:
+        avg_gini = combined['indice_gini'].mean()
+        st.metric("Gini Médio Brasil", f"{avg_gini:.3f}")
+    with col3:
+        max_gini_state = combined.filter(pl.col('indice_gini') == pl.col('indice_gini').max())
+        st.metric("Maior Desigualdade", f"{max_gini_state['NM_UF'][0]}: {max_gini_state['indice_gini'][0]:.3f}")
+    with col4:
+        min_gini_state = combined.filter(pl.col('indice_gini') == pl.col('indice_gini').min())
+        st.metric("Menor Desigualdade", f"{min_gini_state['NM_UF'][0]}: {min_gini_state['indice_gini'][0]:.3f}")
+    
+    # Scatter plot: Gini vs Number of Favelas
+    st.subheader("Correlação: Índice de Gini × Quantidade de Favelas/Comunidades")
+    
+    fig_scatter = px.scatter(
+        combined_pdf,
+        x='indice_gini',
+        y='total_fcu',
+        size='total_municipios',
+        color='indice_gini',
+        hover_name='NM_UF',
+        hover_data={
+            'indice_gini': ':.3f',
+            'total_fcu': ':,',
+            'total_setores': ':,',
+            'total_municipios': ':,'
+        },
+        labels={
+            'indice_gini': 'Índice de Gini (2024)',
+            'total_fcu': 'Número de Favelas/Comunidades',
+            'total_municipios': 'Municípios com Favelas'
+        },
+        title='Relação entre Desigualdade Social e Presença de Favelas/Comunidades',
+        color_continuous_scale='RdYlGn_r',  # Reversed: Green (low inequality) to Red (high inequality)
+        size_max=30
+    )
+    
+    fig_scatter.update_layout(height=500)
+    st.plotly_chart(fig_scatter, use_container_width=True)
+    
+    # Calculate correlation
+    correlation = combined.select([
+        pl.corr('indice_gini', 'total_fcu').alias('correlacao')
+    ])
+    corr_value = correlation['correlacao'][0]
+  
+    
+    # Dual bar chart
+    st.subheader("Comparação por Estado: Gini vs Favelas/Comunidades")
+    
+    # Create figure with secondary y-axis
+    fig_dual = go.Figure()
+    
+    # Sort by Gini for better visualization
+    combined_sorted = combined.sort('indice_gini', descending=True)
+    combined_sorted_pdf = combined_sorted.to_pandas()
+    
+    # Normalize Gini values for color mapping (green to red)
+    gini_normalized = (combined_sorted_pdf['indice_gini'] - combined_sorted_pdf['indice_gini'].min()) / \
+                      (combined_sorted_pdf['indice_gini'].max() - combined_sorted_pdf['indice_gini'].min())
+    
+    # Create color list from green to red
+    colors_gini = [f'rgb({int(255*val)}, {int(255*(1-val))}, 0)' for val in gini_normalized]
+    
+    fig_dual.add_trace(go.Bar(
+        name='Índice de Gini',
+        x=combined_sorted_pdf['NM_UF'],
+        y=combined_sorted_pdf['indice_gini'],
+        yaxis='y',
+        marker_color=colors_gini,
+        opacity=0.8,
+        text=combined_sorted_pdf['indice_gini'].round(3),
+        textposition='outside'
+    ))
+    
+    fig_dual.add_trace(go.Bar(
+        name='Favelas/Comunidades (escala ajustada)',
+        x=combined_sorted_pdf['NM_UF'],
+        y=combined_sorted_pdf['total_fcu'] / combined_sorted_pdf['total_fcu'].max() * 0.6,  # Normalize to 0-0.6 range
+        yaxis='y',
+        marker_color='steelblue',
+        opacity=0.5,
+        text=combined_sorted_pdf['total_fcu'],
+        textposition='inside'
+    ))
+    
+    fig_dual.update_layout(
+        title='Estados Ordenados por Índice de Gini',
+        xaxis=dict(title='Estado', tickangle=-45),
+        yaxis=dict(
+            title=dict(text='Índice de Gini', font=dict(color='indianred')),
+            tickfont=dict(color='indianred')
+        ),
+        barmode='overlay',
+        height=500,
+        hovermode='x unified'
+    )
+    
+    st.plotly_chart(fig_dual, use_container_width=True)
+    
+    # Detailed table
+    st.subheader("Tabela Completa: Estados, Gini e Favelas/Comunidades")
+    
+    display_df = combined_pdf[['NM_UF', 'indice_gini', 'total_fcu', 'total_setores', 'total_municipios']].copy()
+    display_df.columns = ['Estado', 'Índice de Gini (2024)', 'Favelas/Comunidades', 'Setores Censitários', 'Municípios']
+    display_df = display_df.sort_values('Índice de Gini (2024)', ascending=False)
+    
+    st.dataframe(display_df, use_container_width=True, hide_index=True)
+    
+    # Download option
+    csv = combined.write_csv()
     st.download_button(
-        label="Download chart as HTML",
-        data=fig.to_html(),
-        file_name="fertility_rate_distribution.html",
-        mime="text/html"
+        label="📥 Download dados combinados (CSV)",
+        data=csv,
+        file_name="gini_favelas_por_estado.csv",
+        mime="text/csv"
     )
+    
+    # Insights section
+    st.subheader("💡 Insights")
+    
+    # Top 5 states by Gini
+    top5_gini = combined.sort('indice_gini', descending=True).head(5)
+    # Top 5 states by favelas
+    top5_favelas = combined.sort('total_fcu', descending=True).head(5)
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.write("**Top 5 Estados - Maior Desigualdade (Gini)**")
+        for row in top5_gini.iter_rows(named=True):
+            st.write(f"- {row['NM_UF']}: {row['indice_gini']:.3f} ({row['total_fcu']:,} favelas)")
+    
+    with col2:
+        st.write("**Top 5 Estados - Mais Favelas/Comunidades**")
+        for row in top5_favelas.iter_rows(named=True):
+            st.write(f"- {row['NM_UF']}: {row['total_fcu']:,} (Gini: {row['indice_gini']:.3f})")
 
 
 def show_data_explorer(df: pl.DataFrame) -> None:
@@ -480,42 +409,43 @@ def show_data_explorer(df: pl.DataFrame) -> None:
     col1, col2 = st.columns(2)
 
     with col1:
+        # Use NM_UF as display values
+        state_options = sorted(df['NM_UF'].unique().to_list())
         selected_states = st.multiselect(
-            "Select States:",
-            options=sorted(df['uf'].unique().to_list()),
+            "Selecionar Estados:",
+            options=state_options,
             default=None
         )
 
     with col2:
-        pop_range = st.slider(
-            "Population Range:",
-            min_value=int(df['populacao_total'].min()),
-            max_value=int(df['populacao_total'].max()),
-            value=(int(df['populacao_total'].min()), int(df['populacao_total'].max()))
-        )
+        st.write("\n")
+        st.caption("Filtre por município ou comunidade usando o campo de busca abaixo")
 
     # Apply filters
     filtered_df = df
 
     if selected_states:
-        filtered_df = filtered_df.filter(pl.col('uf').is_in(selected_states))
+        filtered_df = filtered_df.filter(pl.col('NM_UF').is_in(selected_states))
 
-    filtered_df = filtered_df.filter(
-        (pl.col('populacao_total') >= pop_range[0]) &
-        (pl.col('populacao_total') <= pop_range[1])
-    )
+    st.write(f"**Mostrando {len(filtered_df)} registros de {len(df)}**")
 
-    st.write(f"**Showing {len(filtered_df)} of {len(df)} municipalities**")
+    # Allow search by municipality or community
+    query = st.text_input("Pesquisar município ou comunidade (parte do nome)")
+    if query:
+        q = query.lower()
+        filtered_df = filtered_df.filter(
+            pl.col('NM_MUN').str.to_lowercase().str.contains(q) |
+            pl.col('NM_FCU').str.to_lowercase().str.contains(q)
+        )
 
-    # Display data
     st.dataframe(filtered_df.to_pandas(), width='stretch', hide_index=True)
 
     # Download option
     csv = filtered_df.write_csv()
     st.download_button(
-        label="Download filtered data as CSV",
+        label="Download dados filtrados como CSV",
         data=csv,
-        file_name="atlas2010_filtered.csv",
+        file_name="favelas_comunidades_2022_filtered.csv",
         mime="text/csv"
     )
 
@@ -523,58 +453,55 @@ def show_data_explorer(df: pl.DataFrame) -> None:
 def main() -> None:
     """Main dashboard application."""
     st.set_page_config(
-        page_title="Atlas Brasil 2010 Dashboard",
-        page_icon="📊",
+        page_title="Favelas e Comunidades Urbanas 2022",
+        page_icon="🏘️",
         layout="wide",
         initial_sidebar_state="expanded"
     )
 
-    st.title("📊 Atlas Brasil 2010 - Municipal Socioeconomic Dashboard")
+    st.title("🏘️ Favelas e Comunidades Urbanas 2022 - Dashboard de Análise")
     st.markdown("""
-    This dashboard provides an interactive analysis of Brazilian municipal socioeconomic data from 2010.
-    The data includes health, education, economic, and demographic indicators for all Brazilian municipalities.
+    Este dashboard fornece uma análise interativa das favelas e comunidades urbanas mapeadas no Brasil em 2022.
+    Os dados incluem informações sobre setores censitários, favelas/comunidades e distribuição geográfica por municípios e estados.
     """)
 
     # Load data
-    df = load_data("atlas2010_cleaned.parquet")
+    df = load_data("favelas_comunidades_2022_cleaned.parquet")
 
     # Sidebar navigation
-    st.sidebar.title("Navigation")
+    st.sidebar.title("Navegação")
     page = st.sidebar.radio(
-        "Select Analysis:",
+        "Selecione a Análise:",
         [
-            "📊 Overview",
-            "🏥 Health Indicators",
-            "📚 Education Indicators",
-            "💰 Economic Indicators",
-            "🗺️ Regional Analysis",
-            "👥 Demographic Analysis",
-            "🔍 Data Explorer"
+            "📊 Visão Geral",
+            "🗺️ Distribuição Geográfica",
+            "🏙️ Análise Municipal",
+            "🏘️ Análise de Comunidades",
+            "📈 Desigualdade Social (Gini)",
+            "🔍 Explorador de Dados"
         ]
     )
 
     # Display selected page
-    if page == "📊 Overview":
+    if page == "📊 Visão Geral":
         show_overview(df)
-    elif page == "🏥 Health Indicators":
-        show_health_analysis(df)
-    elif page == "📚 Education Indicators":
-        show_education_analysis(df)
-    elif page == "💰 Economic Indicators":
-        show_economic_analysis(df)
-    elif page == "🗺️ Regional Analysis":
-        show_regional_analysis(df)
-    elif page == "👥 Demographic Analysis":
-        show_demographic_analysis(df)
-    elif page == "🔍 Data Explorer":
+    elif page == "🗺️ Distribuição Geográfica":
+        show_geographic_distribution(df)
+    elif page == "🏙️ Análise Municipal":
+        show_municipal_analysis(df)
+    elif page == "🏘️ Análise de Comunidades":
+        show_community_analysis(df)
+    elif page == "📈 Desigualdade Social (Gini)":
+        show_inequality_analysis(df)
+    elif page == "🔍 Explorador de Dados":
         show_data_explorer(df)
 
     # Footer
     st.sidebar.markdown("---")
     st.sidebar.markdown("""
-    **Data Source:** Atlas do Desenvolvimento Humano no Brasil 2010
+    **Fonte de Dados:** IBGE - Favelas e Comunidades Urbanas (2022)
 
-    **About:** This dashboard visualizes socioeconomic indicators of Brazilian municipalities.
+    **Sobre:** Este dashboard visualiza a distribuição de favelas e comunidades urbanas no Brasil.
     """)
 
 
